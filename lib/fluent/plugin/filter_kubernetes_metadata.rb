@@ -45,7 +45,9 @@ module Fluent::Plugin
     config_param :kubernetes_url, :string, default: nil
     config_param :cache_size, :integer, default: 1000
     config_param :cache_ttl, :integer, default: 60 * 60
-    config_param :watch, :bool, default: true
+    config_param :watch, :bool, default: nil # deprecated. If set overrides values of watch_pods and watch_namespaces
+    config_param :watch_pods, :bool, default: true
+    config_param :watch_namespaces, :bool, default: true
     config_param :apiVersion, :string, default: 'v1'
     config_param :client_cert, :string, default: nil
     config_param :client_key, :string, default: nil
@@ -162,6 +164,10 @@ module Fluent::Plugin
       require 'lru_redux'
       @stats = KubernetesMetadata::Stats.new
 
+      unless @watch.nil?
+        @watch_pods = @watch_namespaces = @watch
+      end
+
       if @de_dot && @de_dot_separator.include?('.')
         raise Fluent::ConfigError, "Invalid de_dot_separator: cannot be or contain '.'"
       end
@@ -269,16 +275,20 @@ module Fluent::Plugin
           raise Fluent::ConfigError, "Invalid Kubernetes API #{@apiVersion} endpoint #{@kubernetes_url}: #{e.message}"
         end
 
-        if @watch
+        if @watch_pods or @watch_namespaces
           if ENV['K8S_NODE_NAME'].nil? || ENV['K8S_NODE_NAME'].strip.empty?
             log.warn("!! The environment variable 'K8S_NODE_NAME' is not set to the node name which can affect the API server and watch efficiency !!")
           end
 
-          pod_thread = Thread.new(self, &:set_up_pod_thread)
-          pod_thread.abort_on_exception = true
+          if @watch_pods
+            pod_thread = Thread.new(self, &:set_up_pod_thread)
+            pod_thread.abort_on_exception = true
+          end
 
-          namespace_thread = Thread.new(self, &:set_up_namespace_thread)
-          namespace_thread.abort_on_exception = true
+          if @watch_namespaces
+            namespace_thread = Thread.new(self, &:set_up_namespace_thread)
+            namespace_thread.abort_on_exception = true
+          end
         end
       end
       @time_fields = []
